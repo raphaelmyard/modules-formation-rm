@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Module 3 - Calendrier Tarifaire Anticipé</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui, -apple-system, sans-serif; background: #f5f5f5; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); padding: 24px; margin-bottom: 24px; }
+        h1 { color: #4b3e12; font-size: 24px; margin-bottom: 8px; }
+        h2 { color: #4b3e12; font-size: 18px; margin-bottom: 16px; }
+        h3 { color: #4b3e12; font-size: 16px; margin-bottom: 16px; }
+        .subtitle { color: #a4a4a4; font-size: 14px; }
+        .grid { display: grid; gap: 16px; }
+        .grid-3 { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+        .grid-4 { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+        label { display: block; font-size: 14px; font-weight: 500; color: #4b3e12; margin-bottom: 8px; }
+        input, select { width: 100%; padding: 10px 16px; border: 1px solid #a4a4a4; border-radius: 8px; font-size: 14px; }
+        button { padding: 10px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 14px; font-weight: 500; transition: opacity 0.2s; }
+        button:hover { opacity: 0.9; }
+        .btn-primary { background: #cdaa36; color: white; }
+        .btn-secondary { background: white; border: 1px solid #a4a4a4; color: #4b3e12; }
+        .btn-danger { background: #cd5a36; color: white; }
+        .season-card { padding: 16px; border-radius: 8px; border: 2px solid; }
+        .flex { display: flex; gap: 8px; align-items: center; }
+        .flex-between { display: flex; justify-content: space-between; align-items: center; }
+        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
+        .calendar-day { min-height: 96px; padding: 8px; border-right: 1px solid #e5e5e5; border-bottom: 1px solid #e5e5e5; position: relative; }
+        .calendar-header { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-size: 12px; font-weight: 500; padding: 8px 0; background: #fef9f0; color: #4b3e12; }
+        .month-header { padding: 12px 16px; background: #4b3e12; color: white; font-weight: 600; }
+        .event-badge { font-size: 11px; padding: 2px 4px; border-radius: 4px; margin-bottom: 4px; color: white; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e5e5e5; }
+        th { background: #fef9f0; color: #4b3e12; font-weight: 600; font-size: 14px; }
+        td { font-size: 14px; }
+        .overflow-auto { max-height: 160px; overflow-y: auto; }
+        .event-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: white; border: 1px solid #e5e5e5; border-radius: 8px; margin-bottom: 8px; }
+        .mb-2 { margin-bottom: 8px; }
+        .mb-4 { margin-bottom: 16px; }
+        .mt-6 { margin-top: 24px; }
+        .p-4 { padding: 16px; }
+        .icon { width: 20px; height: 20px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        const { useState } = React;
+        
+        const CalendarModule = () => {
+            // Charger les données depuis localStorage au démarrage
+            const loadFromStorage = () => {
+                try {
+                    const saved = localStorage.getItem('module3_data');
+                    if (saved) {
+                        return JSON.parse(saved);
+                    }
+                } catch (e) {
+                    console.error('Erreur lecture localStorage:', e);
+                }
+                return null;
+            };
+
+            const initialData = loadFromStorage();
+            
+            const [propertyName, setPropertyName] = useState(initialData?.propertyName || '');
+            const [tauxOccupationMensuel, setTauxOccupationMensuel] = useState(initialData?.tauxOccupationMensuel || {
+                0: '', 1: '', 2: '', 3: '', 4: '', 5: '', 6: '', 7: '', 8: '', 9: '', 10: '', 11: ''
+            });
+            const [selectedYear, setSelectedYear] = useState(2026);
+            const [viewMode, setViewMode] = useState('calendar');
+            
+            const [priceGrid, setPriceGrid] = useState(initialData?.priceGrid || {
+                lowSeason: { price: '', minStay: '' },
+                midSeason: { price: '', minStay: '' },
+                highSeason: { price: '', minStay: '' },
+                events: { price: '', minStay: '' }
+            });
+            
+            const [calendarData, setCalendarData] = useState(initialData?.calendarData || {});
+            const [selectedSeason, setSelectedSeason] = useState(null);
+            const [customEvents, setCustomEvents] = useState(initialData?.customEvents || []);
+            const [newEventDate, setNewEventDate] = useState('');
+            const [newEventName, setNewEventName] = useState('');
+
+            // Sauvegarder automatiquement à chaque changement
+            React.useEffect(() => {
+                try {
+                    localStorage.setItem('module3_data', JSON.stringify({
+                        propertyName,
+                        tauxOccupationMensuel,
+                        priceGrid,
+                        calendarData,
+                        customEvents
+                    }));
+                } catch (e) {
+                    console.error('Erreur sauvegarde localStorage:', e);
+                }
+            }, [propertyName, tauxOccupationMensuel, priceGrid, calendarData, customEvents]);
+
+            const seasons = [
+                { key: 'lowSeason', label: 'Basse Saison', color: '#87CEEB' },
+                { key: 'midSeason', label: 'Moyenne Saison', color: '#FFA500' },
+                { key: 'highSeason', label: 'Haute Saison', color: '#FF6347' },
+                { key: 'events', label: 'Événementiel', color: '#9370DB' }
+            ];
+
+            const holidays2026 = [
+                { date: '2026-01-01', name: 'Jour de l\'an' },
+                { date: '2026-04-06', name: 'Lundi de Pâques' },
+                { date: '2026-05-01', name: 'Fête du Travail' },
+                { date: '2026-05-08', name: 'Victoire 1945' },
+                { date: '2026-05-14', name: 'Ascension' },
+                { date: '2026-05-25', name: 'Lundi de Pentecôte' },
+                { date: '2026-07-14', name: 'Fête Nationale' },
+                { date: '2026-08-15', name: 'Assomption' },
+                { date: '2026-11-01', name: 'Toussaint' },
+                { date: '2026-11-11', name: 'Armistice 1918' },
+                { date: '2026-12-25', name: 'Noël' }
+            ];
+
+            // Vacances 2025-2026 (selon calendrier officiel Education Nationale)
+            // Les vacances se terminent le DIMANCHE (le lundi est le jour de reprise)
+            const vacations2026 = [
+                // Toussaint 2025 (toutes zones) - du sam 18 oct au lun 3 nov → termine dim 2 nov
+                { start: '2025-10-18', end: '2025-11-02', name: 'Vacances Toussaint', zone: 'A' },
+                { start: '2025-10-18', end: '2025-11-02', name: 'Vacances Toussaint', zone: 'B' },
+                { start: '2025-10-18', end: '2025-11-02', name: 'Vacances Toussaint', zone: 'C' },
+                
+                // Noël 2025-2026 (toutes zones) - du sam 20 déc au lun 5 jan → termine dim 4 jan
+                { start: '2025-12-20', end: '2026-01-04', name: 'Vacances Noël', zone: 'A' },
+                { start: '2025-12-20', end: '2026-01-04', name: 'Vacances Noël', zone: 'B' },
+                { start: '2025-12-20', end: '2026-01-04', name: 'Vacances Noël', zone: 'C' },
+                
+                // Hiver 2026
+                { start: '2026-02-07', end: '2026-02-22', name: 'Vacances hiver', zone: 'A' }, // sam 7 fév au lun 23 fév → dim 22 fév
+                { start: '2026-02-14', end: '2026-03-01', name: 'Vacances hiver', zone: 'B' }, // sam 14 fév au lun 2 mars → dim 1er mars
+                { start: '2026-02-21', end: '2026-03-08', name: 'Vacances hiver', zone: 'C' }, // sam 21 fév au lun 9 mars → dim 8 mars
+                
+                // Printemps 2026
+                { start: '2026-04-04', end: '2026-04-19', name: 'Vacances printemps', zone: 'A' }, // sam 4 avril au lun 20 avril → dim 19 avril
+                { start: '2026-04-11', end: '2026-04-26', name: 'Vacances printemps', zone: 'B' }, // sam 11 avril au lun 27 avril → dim 26 avril
+                { start: '2026-04-18', end: '2026-05-03', name: 'Vacances printemps', zone: 'C' }, // sam 18 avril au lun 4 mai → dim 3 mai
+                
+                // Été 2026 (toutes zones) - sam 4 juillet, reprise mardi 1er sept → lundi 31 août est en vacances
+                { start: '2026-07-04', end: '2026-08-31', name: 'Vacances été', zone: 'A' },
+                { start: '2026-07-04', end: '2026-08-31', name: 'Vacances été', zone: 'B' },
+                { start: '2026-07-04', end: '2026-08-31', name: 'Vacances été', zone: 'C' }
+            ];
+
+            const currentHolidays = holidays2026;
+            const currentVacations = vacations2026;
+
+            const getDateString = (day, month, year) => {
+                return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            };
+
+            const getDaysInMonth = (month, year) => {
+                return new Date(year, month + 1, 0).getDate();
+            };
+
+            const getEventForDate = (dateStr) => {
+                const holiday = currentHolidays.find(h => h.date === dateStr);
+                if (holiday) return { ...holiday, type: 'holiday' };
+                
+                // Trouver toutes les vacances qui incluent cette date
+                const vacations = currentVacations.filter(v => dateStr >= v.start && dateStr <= v.end);
+                if (vacations.length > 0) {
+                    // Construire la liste des zones pour ce jour précis
+                    let zones = [];
+                    vacations.forEach(v => {
+                        if (!zones.includes(v.zone)) {
+                            zones.push(v.zone);
+                        }
+                    });
+                    // Trier les zones alphabétiquement
+                    zones.sort();
+                    const zoneStr = zones.join('+');
+                    return { name: `${vacations[0].name} (${zoneStr})`, type: 'vacation' };
+                }
+                
+                const custom = customEvents.find(e => e.date === dateStr);
+                if (custom) return { ...custom, type: 'custom' };
+                
+                return null;
+            };
+
+            const getPrice = (dateStr) => {
+                const season = calendarData[dateStr]?.season;
+                return season ? parseFloat(priceGrid[season]?.price || 0) : 0;
+            };
+
+            const getMinStay = (dateStr) => {
+                const season = calendarData[dateStr]?.season;
+                return season ? priceGrid[season]?.minStay : '';
+            };
+
+            const toggleDateSeason = (dateStr) => {
+                if (!selectedSeason) return;
+                const newData = { ...calendarData };
+                if (newData[dateStr]?.season === selectedSeason) {
+                    delete newData[dateStr];
+                } else {
+                    newData[dateStr] = { season: selectedSeason };
+                }
+                setCalendarData(newData);
+            };
+
+            const applySeason = (seasonKey) => {
+                const newData = { ...calendarData };
+                for (let m = 0; m < 12; m++) {
+                    const days = getDaysInMonth(m, selectedYear);
+                    for (let d = 1; d <= days; d++) {
+                        const ds = getDateString(d, m, selectedYear);
+                        newData[ds] = { season: seasonKey };
+                    }
+                }
+                setCalendarData(newData);
+            };
+
+            const exportToExcel = () => {
+                const wb = XLSX.utils.book_new();
+                
+                const ws1Data = [[`CALENDRIER TARIFAIRE ${selectedYear}`], [], ['Bien:', propertyName || 'Non renseigné'], [], ['Date','Jour','Événement','Période','Prix Net (€)','Durée Min']];
+                for(let m=0; m<12; m++) {
+                    const days = getDaysInMonth(m, selectedYear);
+                    for(let d=1; d<=days; d++) {
+                        const ds = getDateString(d,m,selectedYear);
+                        const date = new Date(selectedYear,m,d);
+                        const dayName = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'][date.getDay()];
+                        const ev = getEventForDate(ds);
+                        const season = calendarData[ds]?.season ? seasons.find(s=>s.key===calendarData[ds].season)?.label : '';
+                        ws1Data.push([ds, dayName, ev?.name||'', season, getPrice(ds).toFixed(2), getMinStay(ds)||'']);
+                    }
+                }
+                const ws1 = XLSX.utils.aoa_to_sheet(ws1Data);
+                XLSX.utils.book_append_sheet(wb, ws1, 'Calendrier');
+                
+                const ws2Data = [['GRILLE TARIFAIRE'], [], ['Période','Prix Base (€)','Durée Minimale (nuits)']];
+                seasons.forEach(s => {
+                    ws2Data.push([s.label, priceGrid[s.key]?.price||'', priceGrid[s.key]?.minStay||'']);
+                });
+                const ws2 = XLSX.utils.aoa_to_sheet(ws2Data);
+                XLSX.utils.book_append_sheet(wb, ws2, 'Grille tarifaire');
+                
+                // Feuille 3: Prévisionnel revenus
+                const ws3Data = [['PRÉVISIONNEL REVENUS'], [], ['Mois','Potentiel (€)','Taux Occupation (%)','Prévisionnel (€)']];
+                const yearRev = calculateYearRevenue();
+                monthNames.forEach((month, idx) => {
+                    const rev = calculateMonthRevenue(idx);
+                    ws3Data.push([month, rev.potential.toFixed(2), tauxOccupationMensuel[idx] || '0', rev.forecast.toFixed(2)]);
+                });
+                ws3Data.push([]);
+                ws3Data.push(['TOTAL ANNÉE', yearRev.yearPotential.toFixed(2), '', yearRev.yearForecast.toFixed(2)]);
+                const ws3 = XLSX.utils.aoa_to_sheet(ws3Data);
+                XLSX.utils.book_append_sheet(wb, ws3, 'Prévisionnel');
+                
+                XLSX.writeFile(wb, `calendrier_tarifaire_${selectedYear}.xlsx`);
+            };
+
+            const calculateMonthRevenue = (month) => {
+                const days = getDaysInMonth(month, selectedYear);
+                let totalPrice = 0;
+                for (let d = 1; d <= days; d++) {
+                    const dateStr = getDateString(d, month, selectedYear);
+                    totalPrice += getPrice(dateStr);
+                }
+                const occupationRate = parseFloat(tauxOccupationMensuel[month]) || 0;
+                return {
+                    potential: totalPrice,
+                    forecast: (totalPrice * occupationRate) / 100
+                };
+            };
+
+            const calculateYearRevenue = () => {
+                let yearPotential = 0;
+                let yearForecast = 0;
+                for (let m = 0; m < 12; m++) {
+                    const rev = calculateMonthRevenue(m);
+                    yearPotential += rev.potential;
+                    yearForecast += rev.forecast;
+                }
+                return { yearPotential, yearForecast };
+            };
+
+            const hasPriceGrid = Object.values(priceGrid).some(s => s.price);
+            const monthNames = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+
+            return (
+                <div className="container">
+                    <div className="mb-4">
+                        <h1>Module 3 - Calendrier Tarifaire Anticipé</h1>
+                        <p className="subtitle">Planifiez vos tarifs sur l'année complète avec durées minimales et événements</p>
+                        <p style={{fontSize: '12px', color: '#cdaa36', marginTop: '8px'}}>
+                            💾 Vos données sont sauvegardées automatiquement dans votre navigateur
+                        </p>
+                    </div>
+
+                    <div className="card">
+                        <h2>📋 Informations du Bien</h2>
+                        <div className="mb-4">
+                            <label>Nom du bien</label>
+                            <input type="text" value={propertyName} onChange={(e) => setPropertyName(e.target.value)} placeholder="Ex: Studio Le Brivet" />
+                        </div>
+                        <div className="mb-4">
+                            <label>Année</label>
+                            <input type="text" value="2026" disabled style={{background: '#f5f5f5'}} />
+                        </div>
+                    </div>
+
+                    <div className="card">
+                        <h2>💰 Grille Tarifaire par Période</h2>
+                        <div style={{padding: '12px', background: '#fef9f0', borderRadius: '8px', marginBottom: '16px', border: '1px solid #cdaa36'}}>
+                            <p style={{fontSize: '14px', color: '#4b3e12', marginBottom: '8px'}}>
+                                <strong>Mode d'emploi :</strong>
+                            </p>
+                            <ol style={{fontSize: '13px', color: '#4b3e12', paddingLeft: '20px', margin: 0}}>
+                                <li>Remplissez les prix et durées minimales pour chaque période</li>
+                                <li>Cliquez sur une période ci-dessous pour la sélectionner (elle sera surlignée)</li>
+                                <li>Cliquez ensuite sur les dates du calendrier pour leur assigner cette période</li>
+                                <li>Utilisez "Appliquer toute l'année" pour attribuer une période à toutes les dates</li>
+                            </ol>
+                        </div>
+                        <div className="grid grid-4">
+                            {seasons.map(season => (
+                                <div 
+                                    key={season.key} 
+                                    className="season-card" 
+                                    onClick={() => setSelectedSeason(season.key)}
+                                    style={{
+                                        borderColor: season.color, 
+                                        backgroundColor: `${season.color}15`,
+                                        cursor: 'pointer',
+                                        boxShadow: selectedSeason === season.key ? `0 0 0 3px ${season.color}` : 'none',
+                                        transform: selectedSeason === season.key ? 'scale(1.02)' : 'scale(1)',
+                                        transition: 'all 0.2s'
+                                    }}>
+                                    <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px'}}>
+                                        <h3 style={{margin: 0}}>{season.label}</h3>
+                                        {selectedSeason === season.key && <span style={{fontSize: '20px'}}>✓</span>}
+                                    </div>
+                                    <div className="mb-2">
+                                        <label style={{fontSize: '12px'}}>Prix net/nuit (€)</label>
+                                        <input type="number" value={priceGrid[season.key].price} onChange={(e) => setPriceGrid({...priceGrid, [season.key]: {...priceGrid[season.key], price: e.target.value}})} placeholder="0" />
+                                    </div>
+                                    <div className="mb-2">
+                                        <label style={{fontSize: '12px'}}>Durée min (nuits)</label>
+                                        <input type="number" value={priceGrid[season.key].minStay} onChange={(e) => setPriceGrid({...priceGrid, [season.key]: {...priceGrid[season.key], minStay: e.target.value}})} placeholder="1" min="1" />
+                                    </div>
+                                    <button onClick={() => applySeason(season.key)} style={{backgroundColor: season.color, color: 'white', width: '100%', marginTop: '8px'}}>
+                                        Appliquer toute l'année
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {hasPriceGrid && (
+                        <div className="card">
+                            <div className="flex-between mb-4">
+                                <div className="flex">
+                                    <button onClick={() => setViewMode('calendar')} className={viewMode === 'calendar' ? 'btn-primary' : 'btn-secondary'}>
+                                        📅 Vue Calendrier
+                                    </button>
+                                    <button onClick={() => setViewMode('list')} className={viewMode === 'list' ? 'btn-primary' : 'btn-secondary'}>
+                                        📋 Vue Liste
+                                    </button>
+                                </div>
+                                <button onClick={exportToExcel} className="btn-primary">
+                                    📥 Export Excel
+                                </button>
+                            </div>
+
+                            <div style={{maxHeight: '600px', overflowY: 'auto', border: '1px solid #e5e5e5', borderRadius: '8px', marginBottom: '24px'}}>
+                            {viewMode === 'calendar' ? (
+                                <div>
+                                    {Array.from({length: 12}, (_, month) => {
+                                        const days = getDaysInMonth(month, selectedYear);
+                                        const firstDay = new Date(selectedYear, month, 1).getDay();
+                                        return (
+                                            <div key={month} style={{border: '1px solid #e5e5e5', borderRadius: '8px', overflow: 'hidden', marginBottom: '24px'}}>
+                                                <div className="month-header">{monthNames[month]} {selectedYear}</div>
+                                                <div className="calendar-header">
+                                                    {['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'].map(d => <div key={d}>{d}</div>)}
+                                                </div>
+                                                <div className="calendar-grid">
+                                                    {Array.from({length: firstDay}, (_, i) => <div key={`empty-${i}`} className="calendar-day" style={{background: '#f9f9f9'}}></div>)}
+                                                    {Array.from({length: days}, (_, i) => {
+                                                        const day = i + 1;
+                                                        const dateStr = getDateString(day, month, selectedYear);
+                                                        const price = getPrice(dateStr);
+                                                        const minStay = getMinStay(dateStr);
+                                                        const event = getEventForDate(dateStr);
+                                                        const isWeekend = new Date(selectedYear, month, day).getDay() % 6 === 0;
+                                                        
+                                                        return (
+                                                            <div 
+                                                                key={day} 
+                                                                className="calendar-day" 
+                                                                onClick={() => toggleDateSeason(dateStr)}
+                                                                style={{
+                                                                    backgroundColor: isWeekend ? '#fef9f0' : 'white',
+                                                                    cursor: selectedSeason ? 'pointer' : 'default',
+                                                                    border: calendarData[dateStr]?.season ? `2px solid ${seasons.find(s => s.key === calendarData[dateStr].season)?.color}` : 'none'
+                                                                }}>
+                                                                <div style={{fontSize: '14px', fontWeight: '500', color: '#4b3e12', marginBottom: '4px'}}>{day}</div>
+                                                                {event && (
+                                                                    <div className="event-badge" style={{backgroundColor: event.type === 'holiday' ? '#cdaa36' : event.type === 'vacation' ? '#4b3e12' : '#cd5a36'}}>
+                                                                        {event.name}
+                                                                    </div>
+                                                                )}
+                                                                {price > 0 && (
+                                                                    <div style={{fontSize: '12px', fontWeight: '600', color: '#cdaa36'}}>{price.toFixed(0)}€</div>
+                                                                )}
+                                                                {minStay && (
+                                                                    <div style={{fontSize: '11px', color: '#a4a4a4'}}>Min: {minStay}n</div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ) : (
+                                <div>
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>Date</th>
+                                                <th>Jour</th>
+                                                <th>Événement</th>
+                                                <th style={{textAlign: 'center'}}>Période</th>
+                                                <th style={{textAlign: 'center'}}>Prix (€)</th>
+                                                <th style={{textAlign: 'center'}}>Min (nuits)</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {Array.from({length: 12}, (_, m) => {
+                                                const days = getDaysInMonth(m, selectedYear);
+                                                return Array.from({length: days}, (_, d) => {
+                                                    const day = d + 1;
+                                                    const dateStr = getDateString(day, m, selectedYear);
+                                                    const date = new Date(selectedYear, m, day);
+                                                    const dayName = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'][date.getDay()];
+                                                    const event = getEventForDate(dateStr);
+                                                    const season = calendarData[dateStr]?.season ? seasons.find(s => s.key === calendarData[dateStr].season)?.label : '';
+                                                    const price = getPrice(dateStr);
+                                                    const minStay = getMinStay(dateStr);
+                                                    
+                                                    return (
+                                                        <tr key={dateStr}>
+                                                            <td style={{color: '#4b3e12'}}>{dateStr}</td>
+                                                            <td style={{color: '#a4a4a4'}}>{dayName}</td>
+                                                            <td style={{color: event ? '#cd5a36' : '#a4a4a4'}}>{event?.name || '-'}</td>
+                                                            <td style={{textAlign: 'center', color: '#4b3e12'}}>{season || '-'}</td>
+                                                            <td style={{textAlign: 'center', fontWeight: '600', color: price > 0 ? '#cdaa36' : '#a4a4a4'}}>{price > 0 ? `${price.toFixed(2)}€` : '-'}</td>
+                                                            <td style={{textAlign: 'center', color: '#4b3e12'}}>{minStay || '-'}</td>
+                                                        </tr>
+                                                    );
+                                                });
+                                            }).flat()}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                            </div>
+
+                            {/* Événements personnalisés - REMONTÉ ICI */}
+                            <div className="mt-6 p-4" style={{background: '#fef9f0', borderLeft: '4px solid #cdaa36', borderRadius: '8px'}}>
+                                <h3>Événements Personnalisés Locaux</h3>
+                                <div className="flex mb-4">
+                                    <input type="date" value={newEventDate} onChange={(e) => setNewEventDate(e.target.value)} min="2025-10-01" max="2026-09-30" style={{flex: 1}} />
+                                    <input type="text" value={newEventName} onChange={(e) => setNewEventName(e.target.value)} placeholder="Nom événement" maxLength="20" style={{flex: 1}} />
+                                    <button onClick={() => { if(newEventDate && newEventName){ setCustomEvents([...customEvents, {date: newEventDate, name: newEventName}]); setNewEventDate(''); setNewEventName(''); }}} className="btn-primary">
+                                        Ajouter
+                                    </button>
+                                </div>
+                                {customEvents.length > 0 && (
+                                    <div className="overflow-auto">
+                                        {customEvents.map((e, idx) => (
+                                            <div key={idx} className="event-item">
+                                                <div>
+                                                    <span style={{fontWeight: '500', color: '#4b3e12'}}>{e.date}</span>
+                                                    <span style={{margin: '0 8px', color: '#a4a4a4'}}>•</span>
+                                                    <span style={{color: '#4b3e12'}}>{e.name}</span>
+                                                </div>
+                                                <button onClick={() => setCustomEvents(customEvents.filter((_, i) => i !== idx))} className="btn-danger" style={{fontSize: '12px'}}>
+                                                    Supprimer
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Prévisionnel de revenus */}
+                            <div className="p-4 mt-6" style={{background: '#fef9f0', borderRadius: '8px', border: '2px solid #cdaa36'}}>
+                                <h3 style={{marginBottom: '8px'}}>💰 Prévisionnel de Revenus NETS {selectedYear}</h3>
+                                <p style={{fontSize: '12px', color: '#a4a4a4', marginBottom: '16px', fontStyle: 'italic'}}>
+                                    Revenus nets hors frais de ménage, commissions plateforme et transaction, taxe de séjour
+                                </p>
+                                
+                                {/* Taux d'occupation mensuel - déplacé ici */}
+                                <div style={{marginBottom: '24px', padding: '16px', background: 'white', borderRadius: '8px', border: '1px solid #cdaa36'}}>
+                                    <h4 style={{marginBottom: '12px', fontSize: '14px', color: '#4b3e12'}}>
+                                        📊 Taux d'occupation N-1 par mois (%) - Optionnel
+                                    </h4>
+                                    <p style={{fontSize: '12px', color: '#a4a4a4', marginBottom: '12px'}}>
+                                        Renseignez vos taux d'occupation de l'année précédente pour calculer un prévisionnel réaliste
+                                    </p>
+                                    <div className="grid grid-4">
+                                        {monthNames.map((month, idx) => (
+                                            <div key={idx}>
+                                                <label style={{fontSize: '12px'}}>{month}</label>
+                                                <input 
+                                                    type="number" 
+                                                    value={tauxOccupationMensuel[idx]} 
+                                                    onChange={(e) => setTauxOccupationMensuel({...tauxOccupationMensuel, [idx]: e.target.value})} 
+                                                    placeholder="0-100" 
+                                                    min="0" 
+                                                    max="100" 
+                                                />
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-4" style={{marginBottom: '16px'}}>
+                                    {monthNames.map((month, idx) => {
+                                        const rev = calculateMonthRevenue(idx);
+                                        const hasOccupation = tauxOccupationMensuel[idx];
+                                        return (
+                                            <div key={idx} style={{padding: '12px', background: 'white', borderRadius: '8px', border: '1px solid #e5e5e5'}}>
+                                                <div style={{fontSize: '12px', fontWeight: '600', color: '#4b3e12', marginBottom: '8px'}}>{month}</div>
+                                                <div style={{fontSize: '11px', color: '#a4a4a4', marginBottom: '4px'}}>
+                                                    Potentiel: {rev.potential.toFixed(2)}€
+                                                </div>
+                                                {hasOccupation ? (
+                                                    <div style={{fontSize: '13px', fontWeight: '600', color: '#cdaa36'}}>
+                                                        Prévu: {rev.forecast.toFixed(2)}€
+                                                    </div>
+                                                ) : (
+                                                    <div style={{fontSize: '11px', fontStyle: 'italic', color: '#cd5a36'}}>
+                                                        Indiquez le taux
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                                <div style={{padding: '16px', background: '#4b3e12', color: 'white', borderRadius: '8px', textAlign: 'center'}}>
+                                    <div style={{fontSize: '14px', marginBottom: '8px'}}>PRÉVISIONNEL ANNUEL</div>
+                                    <div style={{fontSize: '28px', fontWeight: 'bold'}}>
+                                        {calculateYearRevenue().yearForecast.toFixed(2)}€
+                                    </div>
+                                    <div style={{fontSize: '12px', opacity: 0.8, marginTop: '4px'}}>
+                                        Potentiel max: {calculateYearRevenue().yearPotential.toFixed(2)}€
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        ReactDOM.render(<CalendarModule />, document.getElementById('root'));
+    </script>
+</body>
+</html>

@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Module 1 - Calcul de Seuils de Rentabilité</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui, -apple-system, sans-serif; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); padding: 24px; margin-bottom: 24px; }
+        h1 { color: #4b3e12; font-size: 24px; margin-bottom: 8px; }
+        h2 { color: #4b3e12; font-size: 18px; margin-bottom: 16px; }
+        h3 { color: #4b3e12; font-size: 16px; margin-bottom: 12px; }
+        .subtitle { color: #a4a4a4; font-size: 14px; }
+        .grid { display: grid; gap: 16px; }
+        .grid-2 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+        .grid-3 { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+        label { display: block; font-size: 14px; font-weight: 500; color: #4b3e12; margin-bottom: 8px; }
+        input, select { width: 100%; padding: 10px 16px; border: 1px solid #a4a4a4; border-radius: 8px; font-size: 14px; }
+        button { padding: 10px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 14px; font-weight: 500; transition: opacity 0.2s; }
+        button:hover { opacity: 0.9; }
+        .btn-primary { background: #cdaa36; color: white; }
+        .result-card { padding: 20px; border-radius: 8px; text-align: center; }
+        .big-number { font-size: 36px; font-weight: bold; margin: 8px 0; }
+        .mb-4 { margin-bottom: 16px; }
+        .mt-4 { margin-top: 16px; }
+        .alert { padding: 16px; border-radius: 8px; margin-bottom: 16px; }
+        .alert-info { background: #e3f2fd; border-left: 4px solid #2196f3; color: #1565c0; }
+        .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+        
+        const ThresholdCalculator = () => {
+            // Charger les données depuis localStorage au démarrage
+            const loadFromStorage = () => {
+                try {
+                    const saved = localStorage.getItem('module1_data');
+                    if (saved) {
+                        return JSON.parse(saved);
+                    }
+                } catch (e) {
+                    console.error('Erreur lecture localStorage:', e);
+                }
+                return null;
+            };
+
+            const initialData = loadFromStorage();
+            
+            const [propertyName, setPropertyName] = useState(initialData?.propertyName || '');
+            const [charges, setCharges] = useState(initialData?.charges || {
+                credit: '',
+                condo: '',
+                insurance: '',
+                taxeFonciere: '',
+                cfe: '',
+                taxeHabitation: '',
+                taxeOrdures: '',
+                comptabilite: '',
+                electricity: '',
+                water: '',
+                gaz: '',
+                internet: '',
+                telephone: '',
+                siteInternet: '',
+                streaming: '',
+                outilsGestion: '',
+                provisions: '',
+                entretien: '',
+                autres: ''
+            });
+            
+            // Plus de frais de ménage ni de fréquence - RETIRÉ
+
+            // Sauvegarder automatiquement à chaque changement
+            useEffect(() => {
+                try {
+                    localStorage.setItem('module1_data', JSON.stringify({
+                        propertyName,
+                        charges
+                    }));
+                } catch (e) {
+                    console.error('Erreur sauvegarde localStorage:', e);
+                }
+            }, [propertyName, charges]);
+
+            const updateCharge = (field, value) => {
+                setCharges({ ...charges, [field]: value });
+            };
+
+            // Calculs simples : charges ÷ 31
+            const totalCharges = useMemo(() => {
+                return Object.values(charges).reduce((sum, val) => sum + (parseFloat(val) || 0), 0);
+            }, [charges]);
+
+            const thresholds = useMemo(() => {
+                const dailyMinimum = totalCharges / 31;
+                const dailyComfortable = dailyMinimum * 1.5; // +50%
+                
+                return {
+                    minimum: dailyMinimum,
+                    comfortable: dailyComfortable
+                };
+            }, [totalCharges]);
+
+            const exportToExcel = () => {
+                const wb = XLSX.utils.book_new();
+                
+                // Feuille 1: Charges mensuelles détaillées
+                const ws1Data = [
+                    ['CHARGES MENSUELLES'],
+                    [],
+                    ['Bien:', propertyName || 'Non renseigné'],
+                    [],
+                    ['CHARGES FINANCIÈRES / FISCALES'],
+                    ['Crédit/Loyer', charges.credit || '0'],
+                    ['Charges de copropriété', charges.condo || '0'],
+                    ['Taxe foncière', charges.taxeFonciere || '0'],
+                    ['CFE', charges.cfe || '0'],
+                    ['Taxe d\'habitation', charges.taxeHabitation || '0'],
+                    ['Taxe ordures ménagères', charges.taxeOrdures || '0'],
+                    ['Comptabilité', charges.comptabilite || '0'],
+                    [],
+                    ['ASSURANCES'],
+                    ['Assurance PNO/GLI', charges.insurance || '0'],
+                    [],
+                    ['ABONNEMENTS'],
+                    ['Internet', charges.internet || '0'],
+                    ['Forfait téléphonique', charges.telephone || '0'],
+                    ['Site internet', charges.siteInternet || '0'],
+                    ['Services streaming', charges.streaming || '0'],
+                    ['Outils de gestion', charges.outilsGestion || '0'],
+                    [],
+                    ['ÉNERGIES'],
+                    ['Électricité', charges.electricity || '0'],
+                    ['Eau', charges.water || '0'],
+                    ['Gaz', charges.gaz || '0'],
+                    [],
+                    ['PROVISIONS'],
+                    ['Consommables', charges.provisions || '0'],
+                    ['Budget entretien', charges.entretien || '0'],
+                    ['Autres charges', charges.autres || '0'],
+                    [],
+                    ['TOTAL MENSUEL', totalCharges.toFixed(2)]
+                ];
+                const ws1 = XLSX.utils.aoa_to_sheet(ws1Data);
+                XLSX.utils.book_append_sheet(wb, ws1, 'Charges');
+                
+                // Feuille 2: Seuils de rentabilité journaliers
+                const ws2Data = [
+                    ['SEUILS DE RENTABILITÉ JOURNALIERS'],
+                    [],
+                    ['Total charges mensuelles:', totalCharges.toFixed(2), '€'],
+                    [],
+                    ['Type de seuil', 'Prix Net / Jour (€)'],
+                    ['Seuil MINIMUM (charges ÷ 31)', thresholds.minimum.toFixed(2)],
+                    ['Seuil CONFORTABLE (+50%)', thresholds.comfortable.toFixed(2)]
+                ];
+                const ws2 = XLSX.utils.aoa_to_sheet(ws2Data);
+                XLSX.utils.book_append_sheet(wb, ws2, 'Seuils journaliers');
+                
+                XLSX.writeFile(wb, 'seuils_rentabilite.xlsx');
+            };
+
+            return (
+                <div className="container">
+                    <div className="mb-4">
+                        <h1>Module 1 - Calcul de Seuils de Rentabilité</h1>
+                        <p className="subtitle">Calculez vos charges mensuelles et seuils de rentabilité par plateforme</p>
+                        <p style={{fontSize: '12px', color: '#cdaa36', marginTop: '8px'}}>
+                            💾 Vos données sont sauvegardées automatiquement dans votre navigateur
+                        </p>
+                    </div>
+
+                    <div className="card">
+                        <h2>📋 Votre Bien</h2>
+                        <label>Nom du bien</label>
+                        <input 
+                            type="text" 
+                            value={propertyName} 
+                            onChange={(e) => setPropertyName(e.target.value)} 
+                            placeholder="Ex: Studio Le Brivet" 
+                        />
+                    </div>
+
+                    <div className="card">
+                        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px'}}>
+                            <h2 style={{margin: 0}}>💰 Charges Mensuelles Fixes</h2>
+                            <button onClick={exportToExcel} className="btn-primary">
+                                📥 Export Excel
+                            </button>
+                        </div>
+                        
+                        <div className="alert alert-info mb-4">
+                            <strong>💡 Conseil :</strong> Listez l'intégralité de vos charges mensuelles. Pour les charges annuelles (taxe foncière, CFE, etc.), divisez par 12 pour obtenir le montant mensuel.
+                        </div>
+
+                        <h3 style={{marginTop: '24px', marginBottom: '16px', color: '#4b3e12'}}>💳 Charges Financières / Fiscales</h3>
+                        <div className="grid grid-3">
+                            <div>
+                                <label>Crédit immobilier ou Loyer (€/mois)</label>
+                                <input 
+                                    type="number" 
+                                    value={charges.credit} 
+                                    onChange={(e) => updateCharge('credit', e.target.value)} 
+                                    placeholder="0"
+                                    min="0"
+                                />
+                            </div>
+                            <div>
+                                <label>Charges de copropriété (€/mois)</label>
+                                <input 
+                                    type="number" 
+                                    value={charges.condo} 
+                                    onChange={(e) => updateCharge('condo', e.target.value)} 
+                                    placeholder="0"
+                                    min="0"
+                                />
+                            </div>
+                            <div>
+                                <label>Taxe foncière (€/mois)</label>
+                                <input 
+                                    type="number" 
+                                    value={charges.taxeFonciere} 
+                                    onChange={(e) => updateCharge('taxeFonciere', e.target.value)} 
+                                    placeholder="0"
+                                    min="0"
+                                />
+                            </div>
+                            <div>
+                                <label>CFE (€/mois)</label>
+                                <input 
+                                    type="number" 
+                                    value={charges.cfe} 
+                                    onChange={(e) => updateCharge('cfe', e.target.value)} 
+                                    placeholder="0"
+                                    min="0"
+                                />
+                            </div>
+                            <div>
+                                <label>Taxe d'habitation (€/mois)</label>
+                                <input 
+                                    type="number" 
+                                    value={charges.taxeHabitation} 
+                                    onChange={(e) => updateCharge('taxeHabitation', e.target.value)} 
+                                    placeholder="0"
+                                    min="0"
+                                />
+                            </div>
+                            <div>
+                                <label>Taxe ordures ménagères (€/mois)</label>
+                                <input 
+                                    type="number" 
+                                    value={charges.taxeOrdures} 
+                                    onChange={(e) => updateCharge('taxeOrdures', e.target.value)} 
+                                    placeholder="0"
+                                    min="0"
+                                />
+                            </div>
+                            <div>
+                                <label>Comptabilité (€/mois)</label>
+                                <input 
+                                    type="number" 
+                                    value={charges.comptabilite} 
+                                    onChange={(e) => updateCharge('comptabilite', e.target.value)} 
+                                    placeholder="0"
+                                    min="0"
+                                />
+                            </div>
+                        </div>
+
+                        <h3 style={{marginTop: '24px', marginBottom: '16px', color: '#4b3e12'}}>🛡️ Assurances</h3>
+                        <div className="grid grid-3">
+                            <div>
+                                <label>Assurance PNO/GLI (€/mois)</label>
+                                <input 
+                                    type="number" 
+                                    value={charges.insurance} 
+                                    onChange={(e) => updateCharge('insurance', e.target.value)} 
+                                    placeholder="0"
+                                    min="0"
+                                />
+                            </div>
+                        </div>
+
+                        <h3 style={{marginTop: '24px', marginBottom: '16px', color: '#4b3e12'}}>📡 Abonnements</h3>
+                        <div className="grid grid-3">
+                            <div>
+                                <label>Internet (€/mois)</label>
+                                <input 
+                                    type="number" 
+                                    value={charges.internet} 
+                                    onChange={(e) => updateCharge('internet', e.target.value)} 
+                                    placeholder="0"
+                                    min="0"
+                                />
+                            </div>
+                            <div>
+                                <label>Forfait téléphonique (€/mois)</label>
+                                <input 
+                                    type="number" 
+                                    value={charges.telephone} 
+                                    onChange={(e) => updateCharge('telephone', e.target.value)} 
+                                    placeholder="0"
+                                    min="0"
+                                />
+                            </div>
+                            <div>
+                                <label>Site internet (€/mois)</label>
+                                <input 
+                                    type="number" 
+                                    value={charges.siteInternet} 
+                                    onChange={(e) => updateCharge('siteInternet', e.target.value)} 
+                                    placeholder="0"
+                                    min="0"
+                                />
+                            </div>
+                            <div>
+                                <label>Services streaming (Netflix, etc.) (€/mois)</label>
+                                <input 
+                                    type="number" 
+                                    value={charges.streaming} 
+                                    onChange={(e) => updateCharge('streaming', e.target.value)} 
+                                    placeholder="0"
+                                    min="0"
+                                />
+                            </div>
+                            <div>
+                                <label>Outils de gestion/pilotage (€/mois)</label>
+                                <input 
+                                    type="number" 
+                                    value={charges.outilsGestion} 
+                                    onChange={(e) => updateCharge('outilsGestion', e.target.value)} 
+                                    placeholder="0"
+                                    min="0"
+                                />
+                            </div>
+                        </div>
+
+                        <h3 style={{marginTop: '24px', marginBottom: '16px', color: '#4b3e12'}}>⚡ Énergies</h3>
+                        <div className="grid grid-3">
+                            <div>
+                                <label>Électricité (€/mois)</label>
+                                <input 
+                                    type="number" 
+                                    value={charges.electricity} 
+                                    onChange={(e) => updateCharge('electricity', e.target.value)} 
+                                    placeholder="0"
+                                    min="0"
+                                />
+                            </div>
+                            <div>
+                                <label>Eau (€/mois)</label>
+                                <input 
+                                    type="number" 
+                                    value={charges.water} 
+                                    onChange={(e) => updateCharge('water', e.target.value)} 
+                                    placeholder="0"
+                                    min="0"
+                                />
+                            </div>
+                            <div>
+                                <label>Gaz (€/mois)</label>
+                                <input 
+                                    type="number" 
+                                    value={charges.gaz} 
+                                    onChange={(e) => updateCharge('gaz', e.target.value)} 
+                                    placeholder="0"
+                                    min="0"
+                                />
+                            </div>
+                        </div>
+
+                        <h3 style={{marginTop: '24px', marginBottom: '16px', color: '#4b3e12'}}>🔧 Provisions</h3>
+                        <div className="grid grid-3">
+                            <div>
+                                <label>Consommables (linge, produits, etc.) (€/mois)</label>
+                                <input 
+                                    type="number" 
+                                    value={charges.provisions} 
+                                    onChange={(e) => updateCharge('provisions', e.target.value)} 
+                                    placeholder="0"
+                                    min="0"
+                                />
+                            </div>
+                            <div>
+                                <label>Budget entretien/réparations (€/mois)</label>
+                                <input 
+                                    type="number" 
+                                    value={charges.entretien} 
+                                    onChange={(e) => updateCharge('entretien', e.target.value)} 
+                                    placeholder="0"
+                                    min="0"
+                                />
+                            </div>
+                            <div>
+                                <label>Autres charges (€/mois)</label>
+                                <input 
+                                    type="number" 
+                                    value={charges.autres} 
+                                    onChange={(e) => updateCharge('autres', e.target.value)} 
+                                    placeholder="0"
+                                    min="0"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="mt-4" style={{padding: '20px', background: '#fef9f0', borderRadius: '8px', border: '2px solid #cdaa36', textAlign: 'center'}}>
+                            <div style={{fontSize: '14px', color: '#4b3e12', marginBottom: '8px', fontWeight: '600'}}>
+                                TOTAL CHARGES MENSUELLES
+                            </div>
+                            <div style={{fontSize: '32px', fontWeight: 'bold', color: '#cdaa36'}}>
+                                {totalCharges.toFixed(2)} €
+                            </div>
+                        </div>
+                    </div>
+
+                    {totalCharges > 0 && (
+                        <div className="card">
+                            <h2>🎯 Seuils de Rentabilité Journaliers</h2>
+                            <p className="subtitle mb-4">
+                                Prix nets minimums par jour (hors frais de ménage, commissions et taxes)
+                            </p>
+
+                            <div className="summary-grid">
+                                <div className="result-card" style={{background: '#fff3e0', border: '2px solid #ff9800'}}>
+                                    <div style={{fontSize: '14px', fontWeight: '600', color: '#e65100', marginBottom: '12px'}}>
+                                        📊 SEUIL MINIMUM
+                                    </div>
+                                    <div style={{fontSize: '12px', color: '#666', marginBottom: '12px'}}>
+                                        Charges ÷ 31 jours
+                                    </div>
+                                    <div className="big-number" style={{color: '#ff9800'}}>
+                                        {thresholds.minimum.toFixed(2)} €
+                                    </div>
+                                    <div style={{fontSize: '12px', color: '#666', marginTop: '8px'}}>
+                                        / jour
+                                    </div>
+                                </div>
+
+                                <div className="result-card" style={{background: '#e8f5e9', border: '2px solid #4caf50'}}>
+                                    <div style={{fontSize: '14px', fontWeight: '600', color: '#2e7d32', marginBottom: '12px'}}>
+                                        ✨ SEUIL CONFORTABLE
+                                    </div>
+                                    <div style={{fontSize: '12px', color: '#666', marginBottom: '12px'}}>
+                                        Minimum + 50%
+                                    </div>
+                                    <div className="big-number" style={{color: '#4caf50'}}>
+                                        {thresholds.comfortable.toFixed(2)} €
+                                    </div>
+                                    <div style={{fontSize: '12px', color: '#666', marginTop: '8px'}}>
+                                        / jour
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="mt-4" style={{padding: '16px', background: '#fef9f0', borderRadius: '8px', borderLeft: '4px solid #cdaa36'}}>
+                                <p style={{fontSize: '13px', color: '#4b3e12', lineHeight: '1.6'}}>
+                                    <strong>💡 Comment utiliser ces seuils :</strong><br/>
+                                    • <strong>Seuil MINIMUM</strong> : Prix net par jour pour couvrir vos charges (point mort).<br/>
+                                    • <strong>Seuil CONFORTABLE</strong> : Prix net recommandé pour générer du profit et vivre de votre activité.<br/>
+                                    <br/>
+                                    Ces montants sont HORS frais de ménage, commissions plateformes et taxe de séjour. 
+                                    Utilisez le seuil confortable comme base pour construire votre grille tarifaire.
+                                </p>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        ReactDOM.render(<ThresholdCalculator />, document.getElementById('root'));
+    </script>
+</body>
+</html>
