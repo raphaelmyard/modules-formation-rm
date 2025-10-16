@@ -26,7 +26,7 @@
         button { padding: 10px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 14px; font-weight: 500; transition: opacity 0.2s; }
         button:hover { opacity: 0.9; }
         .btn-primary { background: #cdaa36; color: white; }
-        .competitor-card { padding: 20px; border-radius: 8px; border: 2px solid #cdaa36; background: #fef9f0; }
+        .competitor-card { padding: 20px; border-radius: 8px; border: 2px solid #cdaa36; background: #fef9f0; margin-bottom: 16px; }
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e5e5e5; }
         th { background: #fef9f0; color: #4b3e12; font-weight: 600; font-size: 14px; }
@@ -34,12 +34,12 @@
         .mb-2 { margin-bottom: 8px; }
         .mb-4 { margin-bottom: 16px; }
         .mt-4 { margin-top: 16px; }
-        .p-4 { padding: 16px; }
         .text-center { text-align: center; }
         .font-bold { font-weight: 600; }
         .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
-        .summary-card { padding: 16px; background: white; border-radius: 8px; border: 1px solid #e5e5e5; text-align: center; }
-        .big-number { font-size: 28px; font-weight: bold; color: #cdaa36; }
+        .summary-card { padding: 16px; background: white; border-radius: 8px; border: 1px solid #e5e5e5; }
+        .big-number { font-size: 24px; font-weight: bold; color: #cdaa36; }
+        .alert { padding: 12px; background: #fef9f0; border-radius: 8px; border: 1px solid #cdaa36; margin-bottom: 16px; }
     </style>
 </head>
 <body>
@@ -49,13 +49,10 @@
         const { useState, useMemo, useEffect } = React;
         
         const CompetitiveAnalyzer = () => {
-            // Charger les données depuis localStorage au démarrage
             const loadFromStorage = () => {
                 try {
                     const saved = localStorage.getItem('module2_data');
-                    if (saved) {
-                        return JSON.parse(saved);
-                    }
+                    if (saved) return JSON.parse(saved);
                 } catch (e) {
                     console.error('Erreur lecture localStorage:', e);
                 }
@@ -65,29 +62,53 @@
             const initialData = loadFromStorage();
             
             const [propertyName, setPropertyName] = useState(initialData?.propertyName || '');
+            const [cleaningFees, setCleaningFees] = useState(initialData?.cleaningFees || {
+                airbnb: '',
+                booking: ''
+            });
+            const [commissions, setCommissions] = useState(initialData?.commissions || {
+                airbnb: '15.5',
+                booking: '18'
+            });
             const [data, setData] = useState(initialData?.data || {
                 competitors: Array(5).fill(null).map((_, i) => ({
                     name: `Concurrent ${i + 1}`,
+                    type: '',
                     airbnbLink: '',
+                    airbnbNote: '',
                     bookingLink: '',
+                    bookingNote: '',
                     lowSeason: { 
-                        airbnb: { night1: '', night3: '', night7: '' },
-                        booking: { night1: '', night3: '', night7: '' }
+                        airbnb: { night1: '', night3: '' },
+                        booking: { night1: '', night3: '' }
                     },
                     midSeason: { 
-                        airbnb: { night1: '', night3: '', night7: '' },
-                        booking: { night1: '', night3: '', night7: '' }
+                        airbnb: { night1: '', night3: '' },
+                        booking: { night1: '', night3: '' }
                     },
                     highSeason: { 
-                        airbnb: { night1: '', night3: '', night7: '' },
-                        booking: { night1: '', night3: '', night7: '' }
+                        airbnb: { night1: '', night3: '' },
+                        booking: { night1: '', night3: '' }
                     },
                     events: { 
-                        airbnb: { night1: '', night3: '', night7: '' },
-                        booking: { night1: '', night3: '', night7: '' }
+                        airbnb: { night1: '', night3: '' },
+                        booking: { night1: '', night3: '' }
                     }
                 }))
             });
+
+            useEffect(() => {
+                try {
+                    localStorage.setItem('module2_data', JSON.stringify({
+                        propertyName,
+                        cleaningFees,
+                        commissions,
+                        data
+                    }));
+                } catch (e) {
+                    console.error('Erreur sauvegarde localStorage:', e);
+                }
+            }, [propertyName, cleaningFees, commissions, data]);
 
             const seasons = [
                 { key: 'lowSeason', label: 'Basse Saison', color: '#87CEEB' },
@@ -97,9 +118,8 @@
             ];
 
             const durations = [
-                { key: 'night1', label: '1 nuit' },
-                { key: 'night3', label: '3 nuits' },
-                { key: 'night7', label: '7 nuits' }
+                { key: 'night1', label: '1 nuit', nights: 1 },
+                { key: 'night3', label: '3 nuits', nights: 3 }
             ];
 
             const updateCompetitor = (index, field, value) => {
@@ -114,57 +134,76 @@
                 setData(newData);
             };
 
-            // Calculs des moyennes
+            // Calculs avec la VRAIE formule : (Prix total - Frais ménage) / Durée * (1 - Commission)
             const calculateAverages = useMemo(() => {
                 const result = {};
+                const commAirbnb = parseFloat(commissions.airbnb) / 100 || 0.155;
+                const commBooking = parseFloat(commissions.booking) / 100 || 0.18;
+                const cleanAirbnb = parseFloat(cleaningFees.airbnb) || 0;
+                const cleanBooking = parseFloat(cleaningFees.booking) || 0;
                 
                 seasons.forEach(season => {
-                    result[season.key] = {
-                        airbnb: {},
-                        booking: {},
-                        global: {}
-                    };
+                    result[season.key] = { airbnb: {}, booking: {}, stats: {} };
 
                     durations.forEach(duration => {
-                        // Airbnb
+                        const nights = duration.nights;
+                        
                         const airbnbPrices = data.competitors
-                            .map(c => parseFloat(c[season.key].airbnb[duration.key]))
-                            .filter(p => !isNaN(p) && p > 0);
-                        const airbnbAvg = airbnbPrices.length > 0 
+                            .map(c => {
+                                const grossPrice = parseFloat(c[season.key].airbnb[duration.key]);
+                                if (isNaN(grossPrice) || grossPrice <= 0) return null;
+                                const netPerNight = (grossPrice - cleanAirbnb) / nights * (1 - commAirbnb);
+                                return netPerNight > 0 ? netPerNight : null;
+                            })
+                            .filter(p => p !== null);
+                        
+                        const bookingPrices = data.competitors
+                            .map(c => {
+                                const grossPrice = parseFloat(c[season.key].booking[duration.key]);
+                                if (isNaN(grossPrice) || grossPrice <= 0) return null;
+                                const netPerNight = (grossPrice - cleanBooking) / nights * (1 - commBooking);
+                                return netPerNight > 0 ? netPerNight : null;
+                            })
+                            .filter(p => p !== null);
+
+                        result[season.key].airbnb[duration.key] = airbnbPrices.length > 0 
                             ? airbnbPrices.reduce((a, b) => a + b, 0) / airbnbPrices.length 
                             : 0;
-                        const airbnbNet = airbnbAvg * 0.845; // -15.5%
-
-                        // Booking
-                        const bookingPrices = data.competitors
-                            .map(c => parseFloat(c[season.key].booking[duration.key]))
-                            .filter(p => !isNaN(p) && p > 0);
-                        const bookingAvg = bookingPrices.length > 0 
+                        
+                        result[season.key].booking[duration.key] = bookingPrices.length > 0 
                             ? bookingPrices.reduce((a, b) => a + b, 0) / bookingPrices.length 
                             : 0;
-                        const bookingNet = bookingAvg * 0.82; // -18%
 
-                        result[season.key].airbnb[duration.key] = { gross: airbnbAvg, net: airbnbNet };
-                        result[season.key].booking[duration.key] = { gross: bookingAvg, net: bookingNet };
-
-                        // Moyenne globale (moyenne des nets)
-                        const allNets = [airbnbNet, bookingNet].filter(n => n > 0);
-                        const globalAvg = allNets.length > 0 
-                            ? allNets.reduce((a, b) => a + b, 0) / allNets.length 
-                            : 0;
-                        result[season.key].global[duration.key] = globalAvg;
+                        const allPrices = [...airbnbPrices, ...bookingPrices];
+                        if (allPrices.length > 0) {
+                            result[season.key].stats[duration.key] = {
+                                min: Math.min(...allPrices),
+                                tendance: allPrices.reduce((a, b) => a + b, 0) / allPrices.length,
+                                max: Math.max(...allPrices)
+                            };
+                        } else {
+                            result[season.key].stats[duration.key] = { min: 0, tendance: 0, max: 0 };
+                        }
                     });
                 });
 
                 return result;
-            }, [data]);
+            }, [data, cleaningFees, commissions]);
 
-            // Grille tarifaire recommandée par période
             const priceGrid = useMemo(() => {
                 const grid = {};
                 seasons.forEach(season => {
-                    const prices = durations.map(d => calculateAverages[season.key].global[d.key]).filter(p => p > 0);
-                    grid[season.key] = prices.length > 0 ? prices.reduce((a, b) => a + b, 0) / prices.length : 0;
+                    const allStats = durations.map(d => calculateAverages[season.key].stats[d.key]).filter(s => s.tendance > 0);
+                    if (allStats.length > 0) {
+                        const allTendances = allStats.map(s => s.tendance);
+                        grid[season.key] = {
+                            min: Math.min(...allStats.map(s => s.min)),
+                            tendance: allTendances.reduce((a, b) => a + b, 0) / allTendances.length,
+                            max: Math.max(...allStats.map(s => s.max))
+                        };
+                    } else {
+                        grid[season.key] = { min: 0, tendance: 0, max: 0 };
+                    }
                 });
                 return grid;
             }, [calculateAverages]);
@@ -172,15 +211,16 @@
             const exportToExcel = () => {
                 const wb = XLSX.utils.book_new();
                 
-                // Feuille 1: Données brutes
-                const ws1Data = [['ANALYSE CONCURRENTIELLE'], [], ['Bien:', propertyName || 'Non renseigné'], []];
-                ws1Data.push(['Concurrent', 'Lien Airbnb', 'Lien Booking', 'Période', 'Durée', 'Prix Airbnb (€)', 'Prix Booking (€)']);
+                const ws1Data = [['ANALYSE CONCURRENTIELLE'], [], ['Bien:', propertyName || 'Non renseigné'], ['Frais ménage Airbnb:', cleaningFees.airbnb + '€'], ['Frais ménage Booking:', cleaningFees.booking + '€'], ['Commission Airbnb:', commissions.airbnb + '%'], ['Commission Booking:', commissions.booking + '%'], [], ['Concurrent', 'Type', 'Note Airbnb', 'Note Booking', 'Lien Airbnb', 'Lien Booking', 'Période', 'Durée', 'Prix Airbnb (€)', 'Prix Booking (€)']];
                 
                 data.competitors.forEach(comp => {
                     seasons.forEach(season => {
                         durations.forEach(duration => {
                             ws1Data.push([
                                 comp.name,
+                                comp.type || '',
+                                comp.airbnbNote || '',
+                                comp.bookingNote || '',
                                 comp.airbnbLink || '',
                                 comp.bookingLink || '',
                                 season.label,
@@ -195,31 +235,29 @@
                 const ws1 = XLSX.utils.aoa_to_sheet(ws1Data);
                 XLSX.utils.book_append_sheet(wb, ws1, 'Données brutes');
                 
-                // Feuille 2: Moyennes par plateforme
-                const ws2Data = [['MOYENNES PAR PLATEFORME'], [], ['Période', 'Durée', 'Airbnb Brut', 'Airbnb Net (-15.5%)', 'Booking Brut', 'Booking Net (-18%)']];
+                const ws2Data = [['PRIX NETS PAR NUIT'], [], ['Période', 'Durée', 'Airbnb Net/nuit', 'Booking Net/nuit', 'MIN', 'TENDANCE', 'MAX']];
                 
                 seasons.forEach(season => {
                     durations.forEach(duration => {
-                        const airbnb = calculateAverages[season.key].airbnb[duration.key];
-                        const booking = calculateAverages[season.key].booking[duration.key];
+                        const stats = calculateAverages[season.key].stats[duration.key];
                         ws2Data.push([
                             season.label,
                             duration.label,
-                            airbnb.gross.toFixed(2),
-                            airbnb.net.toFixed(2),
-                            booking.gross.toFixed(2),
-                            booking.net.toFixed(2)
+                            calculateAverages[season.key].airbnb[duration.key].toFixed(2),
+                            calculateAverages[season.key].booking[duration.key].toFixed(2),
+                            stats.min.toFixed(2),
+                            stats.tendance.toFixed(2),
+                            stats.max.toFixed(2)
                         ]);
                     });
                 });
                 
                 const ws2 = XLSX.utils.aoa_to_sheet(ws2Data);
-                XLSX.utils.book_append_sheet(wb, ws2, 'Moyennes plateformes');
+                XLSX.utils.book_append_sheet(wb, ws2, 'Prix nets');
                 
-                // Feuille 3: Grille tarifaire recommandée
-                const ws3Data = [['GRILLE TARIFAIRE RECOMMANDÉE'], [], ['Période', 'Prix Net Moyen (€)']];
+                const ws3Data = [['GRILLE TARIFAIRE RECOMMANDÉE'], [], ['Période', 'Minimum (€)', 'Tendance (€)', 'Maximum (€)']];
                 seasons.forEach(season => {
-                    ws3Data.push([season.label, priceGrid[season.key].toFixed(2)]);
+                    ws3Data.push([season.label, priceGrid[season.key].min.toFixed(2), priceGrid[season.key].tendance.toFixed(2), priceGrid[season.key].max.toFixed(2)]);
                 });
                 
                 const ws3 = XLSX.utils.aoa_to_sheet(ws3Data);
@@ -232,18 +270,67 @@
                 <div className="container">
                     <div className="mb-4">
                         <h1>Module 2 - Analyse Concurrentielle</h1>
-                        <p className="subtitle">Analysez vos concurrents sur Airbnb et Booking pour définir votre grille tarifaire</p>
+                        <p className="subtitle">Analysez vos concurrents pour définir votre grille tarifaire</p>
+                        <p style={{fontSize: '12px', color: '#cdaa36', marginTop: '8px'}}>
+                            💾 Vos données sont sauvegardées automatiquement
+                        </p>
                     </div>
 
                     <div className="card">
-                        <h2>📋 Votre Bien</h2>
-                        <label>Nom du bien</label>
-                        <input 
-                            type="text" 
-                            value={propertyName} 
-                            onChange={(e) => setPropertyName(e.target.value)} 
-                            placeholder="Ex: Studio Tonnerre De Brest" 
-                        />
+                        <h2>📋 Configuration</h2>
+                        <div className="grid grid-3 mb-4">
+                            <div>
+                                <label>Nom de votre bien</label>
+                                <input 
+                                    type="text" 
+                                    value={propertyName} 
+                                    onChange={(e) => setPropertyName(e.target.value)} 
+                                    placeholder="Ex: Studio Le Brivet" 
+                                />
+                            </div>
+                            <div>
+                                <label>Frais ménage Airbnb (€)</label>
+                                <input 
+                                    type="number" 
+                                    value={cleaningFees.airbnb} 
+                                    onChange={(e) => setCleaningFees({...cleaningFees, airbnb: e.target.value})} 
+                                    placeholder="20"
+                                />
+                            </div>
+                            <div>
+                                <label>Frais ménage Booking (€)</label>
+                                <input 
+                                    type="number" 
+                                    value={cleaningFees.booking} 
+                                    onChange={(e) => setCleaningFees({...cleaningFees, booking: e.target.value})} 
+                                    placeholder="20"
+                                />
+                            </div>
+                            <div>
+                                <label>Commission Airbnb (%)</label>
+                                <input 
+                                    type="number" 
+                                    value={commissions.airbnb} 
+                                    onChange={(e) => setCommissions({...commissions, airbnb: e.target.value})} 
+                                    placeholder="15.5"
+                                    step="0.1"
+                                />
+                            </div>
+                            <div>
+                                <label>Commission Booking (%)</label>
+                                <input 
+                                    type="number" 
+                                    value={commissions.booking} 
+                                    onChange={(e) => setCommissions({...commissions, booking: e.target.value})} 
+                                    placeholder="18"
+                                    step="0.1"
+                                />
+                            </div>
+                        </div>
+                        
+                        <div className="alert">
+                            <strong>📝 Mode d'emploi :</strong> Saisissez le <strong>prix TOTAL du séjour</strong> affiché (ex: 150€ pour 3 nuits). Le calcul utilise la formule : <code>(Prix total - Frais ménage) ÷ Durée × (1 - Commission%)</code>
+                        </div>
                     </div>
 
                     <div className="card">
@@ -253,15 +340,9 @@
                                 📥 Export Excel
                             </button>
                         </div>
-                        
-                        <div style={{padding: '12px', background: '#fef9f0', borderRadius: '8px', marginBottom: '24px', border: '1px solid #cdaa36'}}>
-                            <p style={{fontSize: '13px', color: '#4b3e12', lineHeight: '1.6', margin: 0}}>
-                                <strong>💡 Conseil :</strong> Le tarif <strong>7 nuits est optionnel</strong>. Si vos concurrents appliquent de grosses réductions hebdomadaires (-20% ou plus), ne remplissez pas cette colonne car cela fausserait la moyenne à la baisse. Concentrez-vous sur les tarifs 1 et 3 nuits qui reflètent mieux le prix au jour.
-                            </p>
-                        </div>
 
                         {data.competitors.map((competitor, idx) => (
-                            <div key={idx} className="competitor-card mb-4">
+                            <div key={idx} className="competitor-card">
                                 <div className="grid grid-2 mb-4">
                                     <div>
                                         <label>Nom du concurrent {idx + 1}</label>
@@ -272,7 +353,18 @@
                                             placeholder={`Concurrent ${idx + 1}`}
                                         />
                                     </div>
-                                    <div className="grid" style={{gridTemplateColumns: '1fr 1fr', gap: '8px'}}>
+                                    <div>
+                                        <label>Type de bien</label>
+                                        <input 
+                                            type="text" 
+                                            value={competitor.type} 
+                                            onChange={(e) => updateCompetitor(idx, 'type', e.target.value)} 
+                                            placeholder="Studio, T2, T3..."
+                                        />
+                                    </div>
+                                </div>
+                                <div className="grid grid-2 mb-4">
+                                    <div className="grid" style={{gridTemplateColumns: '2fr 1fr', gap: '8px'}}>
                                         <div>
                                             <label>Lien Airbnb</label>
                                             <input 
@@ -283,12 +375,38 @@
                                             />
                                         </div>
                                         <div>
+                                            <label>Note /5</label>
+                                            <input 
+                                                type="number" 
+                                                value={competitor.airbnbNote} 
+                                                onChange={(e) => updateCompetitor(idx, 'airbnbNote', e.target.value)} 
+                                                placeholder="4.8"
+                                                step="0.1"
+                                                min="0"
+                                                max="5"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="grid" style={{gridTemplateColumns: '2fr 1fr', gap: '8px'}}>
+                                        <div>
                                             <label>Lien Booking</label>
                                             <input 
                                                 type="url" 
                                                 value={competitor.bookingLink} 
                                                 onChange={(e) => updateCompetitor(idx, 'bookingLink', e.target.value)} 
                                                 placeholder="https://booking.com/..."
+                                            />
+                                        </div>
+                                        <div>
+                                            <label>Note /10</label>
+                                            <input 
+                                                type="number" 
+                                                value={competitor.bookingNote} 
+                                                onChange={(e) => updateCompetitor(idx, 'bookingNote', e.target.value)} 
+                                                placeholder="9.2"
+                                                step="0.1"
+                                                min="0"
+                                                max="10"
                                             />
                                         </div>
                                     </div>
@@ -329,49 +447,49 @@
                     </div>
 
                     <div className="card">
-                        <h2>📊 Analyse des Prix par Plateforme</h2>
+                        <h2>📊 Analyse des Prix Nets par Nuit</h2>
                         <div style={{overflowX: 'auto'}}>
                             <table>
                                 <thead>
                                     <tr>
                                         <th>Période</th>
                                         <th>Durée</th>
-                                        <th className="text-center">Airbnb Brut (€)</th>
-                                        <th className="text-center">Airbnb Net -15.5% (€)</th>
-                                        <th className="text-center">Booking Brut (€)</th>
-                                        <th className="text-center">Booking Net -18% (€)</th>
-                                        <th className="text-center" style={{background: '#cdaa36', color: 'white'}}>Moyenne Globale (€)</th>
+                                        <th className="text-center">Airbnb Net /nuit (€)</th>
+                                        <th className="text-center">Booking Net /nuit (€)</th>
+                                        <th className="text-center" style={{background: '#ffebee', color: '#c62828'}}>MIN</th>
+                                        <th className="text-center" style={{background: '#e8f5e9', color: '#2e7d32'}}>TENDANCE</th>
+                                        <th className="text-center" style={{background: '#e3f2fd', color: '#1565c0'}}>MAX</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {seasons.map(season => 
                                         durations.map((duration, dIdx) => {
+                                            const stats = calculateAverages[season.key].stats[duration.key];
                                             const airbnb = calculateAverages[season.key].airbnb[duration.key];
                                             const booking = calculateAverages[season.key].booking[duration.key];
-                                            const global = calculateAverages[season.key].global[duration.key];
                                             
                                             return (
                                                 <tr key={`${season.key}-${duration.key}`}>
                                                     {dIdx === 0 && (
-                                                        <td rowSpan={3} style={{fontWeight: '600', color: season.color}}>
+                                                        <td rowSpan={durations.length} style={{fontWeight: '600', color: season.color}}>
                                                             {season.label}
                                                         </td>
                                                     )}
                                                     <td>{duration.label}</td>
-                                                    <td className="text-center" style={{color: '#a4a4a4'}}>
-                                                        {airbnb.gross > 0 ? airbnb.gross.toFixed(2) : '-'}
+                                                    <td className="text-center" style={{color: '#4b3e12', fontWeight: '500'}}>
+                                                        {airbnb > 0 ? airbnb.toFixed(2) : '-'}
                                                     </td>
                                                     <td className="text-center" style={{color: '#4b3e12', fontWeight: '500'}}>
-                                                        {airbnb.net > 0 ? airbnb.net.toFixed(2) : '-'}
+                                                        {booking > 0 ? booking.toFixed(2) : '-'}
                                                     </td>
-                                                    <td className="text-center" style={{color: '#a4a4a4'}}>
-                                                        {booking.gross > 0 ? booking.gross.toFixed(2) : '-'}
+                                                    <td className="text-center font-bold" style={{color: '#c62828'}}>
+                                                        {stats.min > 0 ? stats.min.toFixed(2) : '-'}
                                                     </td>
-                                                    <td className="text-center" style={{color: '#4b3e12', fontWeight: '500'}}>
-                                                        {booking.net > 0 ? booking.net.toFixed(2) : '-'}
+                                                    <td className="text-center font-bold" style={{color: '#2e7d32'}}>
+                                                        {stats.tendance > 0 ? stats.tendance.toFixed(2) : '-'}
                                                     </td>
-                                                    <td className="text-center font-bold" style={{color: '#cdaa36', background: '#fef9f0'}}>
-                                                        {global > 0 ? global.toFixed(2) : '-'}
+                                                    <td className="text-center font-bold" style={{color: '#1565c0'}}>
+                                                        {stats.max > 0 ? stats.max.toFixed(2) : '-'}
                                                     </td>
                                                 </tr>
                                             );
@@ -384,30 +502,47 @@
 
                     <div className="card">
                         <h2>🎯 Grille Tarifaire Recommandée</h2>
-                        <p className="subtitle mb-4">Prix nets moyens à appliquer par période (toutes plateformes confondues)</p>
+                        <p className="subtitle mb-4">Prix nets par nuit à appliquer (MIN / TENDANCE / MAX)</p>
                         
                         <div className="summary-grid">
                             {seasons.map(season => (
-                                <div key={season.key} className="summary-card" style={{borderColor: season.color, borderWidth: '2px'}}>
-                                    <div style={{fontSize: '14px', fontWeight: '600', color: season.color, marginBottom: '8px'}}>
+                                <div key={season.key} className="summary-card" style={{borderTop: `4px solid ${season.color}`}}>
+                                    <div style={{fontSize: '14px', fontWeight: '600', color: season.color, marginBottom: '12px'}}>
                                         {season.label}
                                     </div>
-                                    <div className="big-number">
-                                        {priceGrid[season.key] > 0 ? priceGrid[season.key].toFixed(2) : '-'}
+                                    <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', textAlign: 'center'}}>
+                                        <div>
+                                            <div style={{fontSize: '11px', color: '#c62828', fontWeight: '600'}}>MIN</div>
+                                            <div style={{fontSize: '18px', fontWeight: 'bold', color: '#c62828'}}>
+                                                {priceGrid[season.key].min > 0 ? priceGrid[season.key].min.toFixed(0) : '-'}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div style={{fontSize: '11px', color: '#2e7d32', fontWeight: '600'}}>TENDANCE</div>
+                                            <div className="big-number">
+                                                {priceGrid[season.key].tendance > 0 ? priceGrid[season.key].tendance.toFixed(0) : '-'}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div style={{fontSize: '11px', color: '#1565c0', fontWeight: '600'}}>MAX</div>
+                                            <div style={{fontSize: '18px', fontWeight: 'bold', color: '#1565c0'}}>
+                                                {priceGrid[season.key].max > 0 ? priceGrid[season.key].max.toFixed(0) : '-'}
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div style={{fontSize: '12px', color: '#a4a4a4', marginTop: '4px'}}>
+                                    <div style={{fontSize: '11px', color: '#a4a4a4', marginTop: '8px', textAlign: 'center'}}>
                                         € / nuit
                                     </div>
                                 </div>
                             ))}
                         </div>
 
-                        <div className="mt-4 p-4" style={{background: '#fef9f0', borderRadius: '8px', borderLeft: '4px solid #cdaa36'}}>
+                        <div className="mt-4 alert">
                             <p style={{fontSize: '13px', color: '#4b3e12', lineHeight: '1.6'}}>
-                                <strong>💡 Comment utiliser ces prix :</strong><br/>
-                                Ces prix nets représentent ce que vous recevrez réellement après commissions. 
-                                Utilisez ces montants comme base pour votre Module 3 (Calendrier Tarifaire). 
-                                Ajustez selon votre positionnement (premium = +10-20%, économique = -10-15%).
+                                <strong>💡 Comment utiliser :</strong><br/>
+                                • <strong>MIN</strong> : Prix conservateur pour maximiser l'occupation<br/>
+                                • <strong>TENDANCE</strong> : Prix équilibré recommandé (moyenne du marché)<br/>
+                                • <strong>MAX</strong> : Prix premium si votre bien est au-dessus du marché
                             </p>
                         </div>
                     </div>
